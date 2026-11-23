@@ -4,6 +4,7 @@ const cors = require("cors");
 const {loggerMiddleware} = require("../middlewares/logger")
 const errorHandler = require("../middlewares/errorHandling");
 const authRoutes = require("../routes/auth.routes");
+const walletRoutes = require("../routes/wallet.routes")
 
 app.use(cors());
 app.use(express.json());
@@ -12,6 +13,7 @@ app.use(loggerMiddleware);
 
 //Routes
 app.use("/api/auth", authRoutes);
+app.use("/api/wallet", walletRoutes);
 
 
 //Welcome route
