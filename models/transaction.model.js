@@ -13,6 +13,13 @@ const transactionSchema = new mongoose.Schema({
         required: true
     },
 
+    
+    transferReference: {
+        type: String,
+        index: true,
+        default: null,
+    },
+
     category: {
         type: String,
         enum: ["funding", "transfer", "refund", "adjustment"],

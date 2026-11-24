@@ -34,7 +34,8 @@ const walletSchema = new mongoose.Schema({
         type: String,
         enum:["active", "frozen", "closed"],
         default: "active"
-    }
+    }, 
+
 }, {
     timestamps: true
 })

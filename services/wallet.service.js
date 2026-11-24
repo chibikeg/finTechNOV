@@ -174,6 +174,102 @@ const fundWallet = async (userId, amountKobo, idempotencyKey) => {
 };
 
 
+const tranferWallet = async (senderUserId, recipientWalletNumber, amountKobo, idempotencyKey) => {
+   // 1. Validate the amount
+   if(!Number.isSafeInteger(amountKobo) || amountKobo <= 0) {
+    throw createError ("Enter a valid tranfer amount")
+   }
+
+   //2. Validate the recipient wallet Number
+   if (
+    typeof recipientWalletNumber !== "string" ||
+    !recipeintWalletNumber.trim()
+   ){
+    throw createError ("Recipient wallet number is required")
+   }
+
+   //3 Validate the idempotency key 
+  if (
+    typeof idempotencyKey !== "string" ||
+    idempotencyKey.length < 8 ||
+    idempotencyKey.length > 100
+  ) {
+    throw createError("A valid idempotency key is required");
+  }
+
+  const recipientNumber = recipientWalletNumber.trim()
+  //4. Helper: check whether a previuos request used this key
+  const getExistingTransfer = async () => {
+    return Transaction.findOne({
+      user: senderUserId,
+      idempotencyKey,
+      category: "transfer"
+    })
+  }
+
+  //Helper: make sure a resued key has the same request details
+  const returnExistingTransfer = async (existingTransaction) => {
+    const previousRecipientId = 
+      existingTransaction.metadata?.recipientWalletId?.toString();
+
+      const recipient = await Wallet.findOne({
+        walletNumber: recipientNumber,
+      });
+
+      if (
+        existingTransaction.amountKobo !== amountKobo ||
+        previousRecipientId !== recipient?._id.toString()
+      ){
+        throw createError(
+         "This idempotency key was already used for a different transfer",
+          409
+        )
+        
+      }
+
+      const creditTransaction = await Transaction.findOne({
+        transferReference: existingTransaction.transferReference,
+        type: "credit",
+      });
+
+      const senderWallet = await Wallet.findById(existingTransaction.wallet);
+      const recipientWallet = recipient
+        ? await wallet.findById(recipient._id)
+        : null;
+      
+        return {
+          duplicaete: true,
+          transferRefernece: existingTransaction.transferReference,
+          debitTransaction: existingTransaction,
+          creditTransaction,
+          senderWallet,
+          recipientWallet
+        }
+    
+  }
+
+  // 4. Check whether this request has already been processed
+  const existingTranssaction = await getExistingTransfer();
+
+  if (existingTransaction) {
+    return returnExistingTransfer(existingTranssaction)
+  }
+
+  // Generate refernces outside the transaction callback
+  // MongoDB may retry the callback, so we should not generate new
+  // references every time it runs
+
+  const transferReference = generateReference("FC-TRANSFER");
+  const debitReference = generateReference("FC-DEBIT");
+  const creditReference = generateReference("FC-DEBIT");
+
+  const session = await mongoose.startSession();
+
+  
+
+}
+
+
 module.exports = {
     getWallet,
     getWalletBalance,
