@@ -265,7 +265,172 @@ const tranferWallet = async (senderUserId, recipientWalletNumber, amountKobo, id
 
   const session = await mongoose.startSession();
 
-  
+  try{
+    let transferResult;
+
+    await session.withTransaction(async () => {
+      // 5. Find the sender's wallet
+      const senderWallet = await wallet.findOne ({
+        user: senderUserId,
+      }).session(session);
+
+      if (!senderWallet){
+        throw createError("Sender wallet not found", 404)
+      }
+
+      //6. Find the recipient's wallet
+      const recipientWallet = await Wallet.findOne({
+        walletNumber: recipientNumber,
+      }).session(session);
+
+       if (!recipientWallet){
+        throw createError("Recipient wallet not found", 404)
+      }
+
+      //7. Prevent self-transfer
+      if(senderWallet._id.equals(recipientWallet._id)){
+          throw createError("You cannot transfer money to yourself")
+      }
+
+      //8. Check both wallets are active
+      if(
+        senderWallet.status !== "active" ||
+        recipientWallet.status !== "active"
+      ){
+          throw createError("Both wallets must be active")
+      }
+
+      //9. Debit the sender atomically
+      //The balance condition prevents overdrawing the wallet
+      const updateSenderWallet = await wallet.findOneAndUpdate(
+        {
+          _id: senderWallet._id,
+          user: senderUserId,
+          status: "active",
+          balanceKobo: { $gte: amountKobo }
+        },
+        {
+          $inc: {
+            balanceKobo: -amountKobo
+          },
+        },
+        {
+          new: true,
+          session,
+          runValidators: true
+        }
+      );
+      if (!updatedSenderWallet){
+        throw createError("insufficient wallet balance", 400);
+      }
+
+      //10. Credit the recipient aomically
+      // The upper-bound condition protects against exceeding
+      //JavaScript's safe integer limit.
+
+      const updatedRecipientWallet = await Wallet.findOneAndUpdate(
+        {
+          _id: recipientWallet._id,
+          status:"active",
+          balanceKobo: {
+            $lte: Number.MAX_SAFE_INTEGER - amountKobo,
+          }
+        },
+
+        {
+          $inc: {
+            balanceKobo: amountKobo,
+          },
+        },
+
+        {
+          new: true,
+          session,
+          runValidators: true
+        }
+      );
+
+      if(!updatedRecipientWallet){
+        throw createError(
+          "Recipient wallet could not be credited",
+          400
+        )
+      }
+
+      //11. Calculate balance snapshots
+      const senderBalanceBefore = updateSenderWallet.balanceKobo + amountKobo;
+
+      const recipientBalanceBefore = updateRecipientWallet.balanceKobo - amountKobo;
+
+      //12. Create both transaction records
+      const [debitTransaction, creditTransaction] =
+        await Transaction.create(
+          [
+            {
+              user: senderUserId,
+              wallet: senderWallet._id,
+              type: "debit",
+              category: "transfer",
+              amountKobo,
+              reference: debitReference,
+              transferReference, idempotencyKey,
+              description: `Transfer to ${recipientNumber}`,
+              status: "successful",
+              balanceBeforeKobo: senderBalanceBefore,
+              balanceAfterKobo: updatedSenderWallet.balanceKobo,
+              metadata: {
+                recipientWalletId: recipientWallet._id,
+                recipientWalletNumber: recipientNumber,
+              },
+            },
+            {
+              user: recipientWallet.user,
+              wallet: recipientWallet._id,
+              type: "credit",
+              category: "transfer",
+              amountKobo,
+              reference: creditReference,
+              transferReference,
+              description: `Transfer received from ${senderWallet.walletNumber}`,
+              status: "successful",
+              balanceBeforeKobo: recipientBalanceBefore,
+              balanceAfterKobo: updatedRecipientWallet.balanceKobo,
+              metadata: {
+                senderWalletId: senderWallet._id,
+                senderWalletNumber: senderWallet.walletNumber,
+              },
+            },
+          ],
+          { session }
+        );
+
+        //13. Prepare the response
+        transferResult = {
+          duplicate: false,
+          transferReference,
+          debitTransaction,
+          creditTransaction,
+          senderWallet: updatedSenderWallet,
+          recipientWallet: updatedRecipientWallet,
+        };
+    })
+
+    return transferResult;
+  } catch(error){
+    //A simultaneous duplicate request may reach the unique index
+    // before the first request has completed
+    if(error.code === 11000){
+      const existing = await getExistingTransfer();
+
+      if(existing){
+        return await returnExistingTransfer(existing);
+      }
+    }
+
+    throw error;
+  } finally{
+    await session.endSession();
+  }
 
 }
 
@@ -273,6 +438,7 @@ const tranferWallet = async (senderUserId, recipientWalletNumber, amountKobo, id
 module.exports = {
     getWallet,
     getWalletBalance,
-    fundWallet
+    fundWallet,
+    transferWallet
 
 }

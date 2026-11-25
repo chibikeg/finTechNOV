@@ -1,7 +1,8 @@
 const {
     getWallet,
     getWalletBalance,
-    fundWallet
+    fundWallet,
+    transferWallet
 } = require("../services/wallet.service");
 
 //Get wallet details
@@ -65,9 +66,40 @@ const fundMyWallet = async( req, res, next) => {
     }
 }
 
+const transferMyWallet = async (req, res, next) => {
+    try{
+        const { recipientWalletNumber, amountKobo } = req.body;
+
+        //The sender is obtained from the authenticated user.
+        // Never accept the sender's ID from the request body.
+
+        const senderUserId = req.user._id;
+        const idempotencyKey = req.get("Idempotency-Key");
+
+        const result = await transferWallet(
+            senderUserId,
+            recipientWalletNumber,
+            amountKobo,
+            idempotencyKey
+        );
+
+        return res.status(result.duplicate ? 200 : 201).json({
+            success: true,
+            message: result.duplicate
+                ? "This transfer was already processed"
+                : "Transfer completed successfully",
+                data: result,
+        });
+    } catch(error){
+        next(error)
+    }
+}
+
 
 module.exports = {
     getMyWallet,
     getMyWalletBalance,
-    fundMyWallet
+    fundMyWallet,
+    transferMyWallet
+
 }
